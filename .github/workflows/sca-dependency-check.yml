@@ -49,24 +49,22 @@ jobs:
           -DdataDirectory="${{ runner.temp }}/dependency-check-data"
           -DossindexAnalyzerEnabled=false
           -DfailBuildOnCVSS=11
-      - name: Publicar SARIF # Envía los hallazgos a GitHub Security.
+            - name: Publicar SARIF # Envía los hallazgos a GitHub Security.
         if: ${{ always() && hashFiles('target/dependency-check-report.sarif') != '' }} # Solo si existe SARIF.
         uses: github/codeql-action/upload-sarif@v4 # Publica análisis externos.
         with: # Configura la publicación.
           sarif_file: target/dependency-check-report.sarif # Archivo generado.
           category: dependency-check # Identifica el análisis SCA.
-      - name: Guardar reportes SCA # Conserva las evidencias.
-        if: always() # Ejecuta incluso si falla el análisis.
-        uses: actions/upload-artifact@v4 # Publica los archivos descargables.
-        with: # Configura el artefacto.
-          name: dependency-check-reports # Nombre del artefacto.
-          path: | # Selecciona los reportes.
-            target/dependency-check-report.html # Reporte visual.
-            target/dependency-check-report.xml # Reporte para DefectDojo.
-            target/dependency-check-report.json # Reporte estructurado.
-            target/dependency-check-report.sarif # Reporte SARIF.
-          if-no-files-found: warn # Avisa si no se generaron.
-          retention-days: 30 # Conserva los reportes durante 30 días.
+      
+      - name: Guardar reportes SCA # Conserva las evidencias del análisis.
+        if: always() # Ejecuta este paso incluso si falla Dependency-Check.
+        uses: actions/upload-artifact@v4 # Publica los reportes descargables.
+        with: # Configura los parámetros del artefacto.
+          name: dependency-check-reports # Nombre del artefacto en GitHub.
+          path: target/dependency-check-report.* # Incluye todos los formatos generados.
+          if-no-files-found: error # Informa un error si no hay reportes.
+          retention-days: 30 # Conserva los archivos durante 30 días.
+
 
   sbom: # Segundo job: puntos extra del laboratorio.
     name: Generar SBOM CycloneDX # Nombre del job adicional.
