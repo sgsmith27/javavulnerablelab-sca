@@ -1,93 +1,158 @@
 
-# Nombre del workflow visible en GitHub Actions.
+
+# Nombre que aparecerá en la pestaña GitHub Actions.
 name: SCA - OWASP Dependency-Check
 
-# Eventos que activan el análisis.
+# Eventos que activan el workflow.
 on:
-  push: # Ejecuta el análisis cuando se publica código.
-    branches: [main] # Limita el evento push a main.
-  pull_request: # Ejecuta el análisis para solicitudes de integración.
-    branches: [main] # Solo considera PR dirigidos a main.
-  workflow_dispatch: # Permite ejecutar el workflow manualmente.
+  push: # Ejecuta el análisis cuando se publican cambios.
+    branches: [main] # Solo para la rama principal.
+  pull_request: # Analiza las solicitudes de integración.
+    branches: [main] # Solo PR dirigidos a main.
+  workflow_dispatch: # Permite ejecutar el análisis manualmente.
 
-# Define los permisos mínimos del token de GitHub.
+# Permisos necesarios para analizar y publicar resultados.
 permissions:
-  contents: read # Permite leer el repositorio.
+  contents: read # Permite descargar el código fuente.
   security-events: write # Permite publicar resultados SARIF.
 
-# Agrupa los trabajos del pipeline.
+# Define los trabajos del pipeline.
 jobs:
-  sca: # Primer job: análisis de vulnerabilidades.
-    name: Dependency-Check # Nombre del job.
-    runs-on: ubuntu-latest # Utiliza un runner Linux de GitHub.
-    steps: # Define los pasos del análisis.
-      - name: Descargar repositorio # Identifica el paso.
-        uses: actions/checkout@v6 # Descarga el código fuente.
-      - name: Configurar Java 17 # Prepara el JDK solicitado.
-        uses: actions/setup-java@v6 # Utiliza la acción oficial.
-        with: # Configura Java.
-          distribution: temurin # Selecciona Eclipse Temurin.
-          java-version: '17' # Establece Java 17.
-          cache: maven # Reutiliza las dependencias Maven.
-      - name: Obtener fecha UTC # Prepara la clave de caché.
-        id: fecha # Identificador del paso.
-        run: echo "dia=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT" # Guarda la fecha.
-      - name: Restaurar base NVD # Reutiliza datos entre ejecuciones.
-        uses: actions/cache@v4 # Utiliza la caché de GitHub.
-        with: # Configura el almacenamiento.
-          path: ${{ runner.temp }}/dependency-check-data # Base local de NVD.
-          key: odc-13-${{ runner.os }}-${{ steps.fecha.outputs.dia }} # Caché diaria.
-          restore-keys: | # Recupera una caché anterior si hace falta.
-            odc-13-${{ runner.os }}- # Busca una versión previa.
-      - name: Ejecutar Dependency-Check # Analiza las dependencias.
-        env: # Declara variables del proceso.
-          NVD_API_KEY: ${{ secrets.NVD_API_KEY }} # Lee el secreto de GitHub.
-        run: >- # Ejecuta el comando Maven.
+  # Job principal: análisis de composición de software.
+  sca:
+    name: Dependency-Check # Nombre visible del trabajo.
+    runs-on: ubuntu-latest # Runner Linux de GitHub.
+
+    # Pasos que conforman el análisis SCA.
+    steps:
+      # Descarga el proyecto JavaVulnerableLab.
+      - name: Descargar repositorio
+        uses: actions/checkout@v6 # Acción oficial de GitHub.
+
+      # Instala el JDK solicitado en el laboratorio.
+      - name: Configurar Java 17
+        uses: actions/setup-java@v6 # Configura Java en el runner.
+        with:
+          distribution: temurin # Distribución Eclipse Temurin.
+          java-version: '17' # Versión de Java requerida.
+          cache: maven # Caché de dependencias Maven.
+
+      # Obtiene la fecha para gestionar la caché NVD.
+      - name: Obtener fecha UTC
+        id: fecha # Identificador para referenciar la salida.
+        run: echo "dia=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      # Recupera los datos de vulnerabilidades descargados previamente.
+      - name: Restaurar base NVD
+        uses: actions/cache@v4 # Almacena y recupera caché.
+        with:
+          # Directorio de datos de Dependency-Check.
+          path: ${{ runner.temp }}/dependency-check-data
+          # La fecha permite crear una nueva caché diariamente.
+          key: odc-13-${{ runner.os }}-${{ steps.fecha.outputs.dia }}
+          # Recupera una caché anterior si no existe la del día.
+          restore-keys: |
+            odc-13-${{ runner.os }}-
+
+      # Ejecuta el análisis de las dependencias vulnerables.
+      - name: Ejecutar Dependency-Check
+        # Carga la clave NVD sin incorporarla al repositorio.
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        # Genera los reportes y reutiliza la base de vulnerabilidades.
+        run: >-
           mvn -B org.owasp:dependency-check-maven:13.0.0:check
           -Dformat=ALL
           -DnvdApiKeyEnvironmentVariable=NVD_API_KEY
           -DdataDirectory="${{ runner.temp }}/dependency-check-data"
           -DossindexAnalyzerEnabled=false
           -DfailBuildOnCVSS=11
-            - name: Publicar SARIF # Envía los hallazgos a GitHub Security.
-        if: ${{ always() && hashFiles('target/dependency-check-report.sarif') != '' }} # Solo si existe SARIF.
-        uses: github/codeql-action/upload-sarif@v4 # Publica análisis externos.
-        with: # Configura la publicación.
-          sarif_file: target/dependency-check-report.sarif # Archivo generado.
-          category: dependency-check # Identifica el análisis SCA.
-      
-      - name: Guardar reportes SCA # Conserva las evidencias del análisis.
-        if: always() # Ejecuta este paso incluso si falla Dependency-Check.
-        uses: actions/upload-artifact@v4 # Publica los reportes descargables.
-        with: # Configura los parámetros del artefacto.
-          name: dependency-check-reports # Nombre del artefacto en GitHub.
-          path: target/dependency-check-report.* # Incluye todos los formatos generados.
-          if-no-files-found: error # Informa un error si no hay reportes.
-          retention-days: 30 # Conserva los archivos durante 30 días.
 
+      # Comprueba que los reportes requeridos existen.
+      - name: Verificar reportes generados
+        # Continúa aunque falle el escaneo, para mostrar el diagnóstico.
+        if: always()
+        # Comprueba los archivos esenciales del laboratorio.
+        shell: bash
+        run: |
+          ls -lah target/dependency-check-report.* || true
+          test -s target/dependency-check-report.html
+          test -s target/dependency-check-report.xml
+          test -s target/dependency-check-report.json
+          test -s target/dependency-check-report.sarif
 
-  sbom: # Segundo job: puntos extra del laboratorio.
-    name: Generar SBOM CycloneDX # Nombre del job adicional.
-    runs-on: ubuntu-latest # Utiliza otro runner Linux.
-    steps: # Define los pasos del SBOM.
-      - name: Descargar repositorio # Prepara el código fuente.
-        uses: actions/checkout@v6 # Descarga el repositorio.
-      - name: Configurar Java 17 # Configura el JDK.
-        uses: actions/setup-java@v6 # Utiliza la acción oficial.
-        with: # Establece los parámetros de Java.
-          distribution: temurin # Selecciona Temurin.
-          java-version: '17' # Utiliza Java 17.
-          cache: maven # Reutiliza dependencias Maven.
-      - name: Generar CycloneDX # Construye el inventario de componentes.
-        run: >- # Ejecuta el plugin Maven.
+      # Publica las vulnerabilidades en GitHub Code scanning.
+      - name: Publicar SARIF
+        # Solo publica si el archivo existe.
+        if: ${{ always() && hashFiles('target/dependency-check-report.sarif') != '' }}
+        # Acción oficial para cargar resultados SARIF.
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          # Ubicación del reporte generado.
+          sarif_file: target/dependency-check-report.sarif
+          # Categoría para identificar el análisis de dependencias.
+          category: dependency-check
+
+      # Conserva todos los reportes como evidencia descargable.
+      - name: Guardar reportes SCA
+        # Intenta guardar archivos aunque existan errores anteriores.
+        if: always()
+        # Acción oficial de GitHub para publicar artefactos.
+        uses: actions/upload-artifact@v4
+        with:
+          # Nombre del artefacto que aparecerá en GitHub.
+          name: dependency-check-reports
+          # Incluye HTML, XML, JSON, CSV y SARIF.
+          path: target/dependency-check-report.*
+          # Marca error si no se encuentra ningún reporte.
+          if-no-files-found: error
+          # Conserva los archivos durante 30 días.
+          retention-days: 30
+
+  # Job adicional para generar el inventario SBOM.
+  sbom:
+    name: Generar SBOM CycloneDX # Nombre visible del trabajo.
+    runs-on: ubuntu-latest # Utiliza un runner Linux.
+
+    # Pasos de generación del SBOM.
+    steps:
+      # Descarga el código fuente del proyecto.
+      - name: Descargar repositorio
+        uses: actions/checkout@v6 # Acción oficial de GitHub.
+
+      # Prepara el entorno Java.
+      - name: Configurar Java 17
+        uses: actions/setup-java@v6 # Acción oficial para instalar Java.
+        with:
+          distribution: temurin # Utiliza Eclipse Temurin.
+          java-version: '17' # Establece JDK 17.
+          cache: maven # Reutiliza dependencias descargadas.
+
+      # Genera el inventario de componentes en formato CycloneDX.
+      - name: Generar CycloneDX
+        # Ejecuta el plugin Maven utilizado en el laboratorio.
+        run: >-
           mvn -B org.cyclonedx:cyclonedx-maven-plugin:2.9.3:makeAggregateBom
           -DoutputFormat=json
           -DoutputName=bom
-      - name: Guardar SBOM # Publica el inventario.
-        if: always() # Intenta guardar aunque haya errores previos.
-        uses: actions/upload-artifact@v4 # Sube un artefacto descargable.
-        with: # Configura el archivo.
-          name: cyclonedx-sbom # Nombre del artefacto.
-          path: target/bom.json # Inventario CycloneDX.
-          if-no-files-found: warn # Avisa si falta el archivo.
-          retention-days: 30 # Conserva el SBOM durante 30 días.
+
+      # Verifica que se haya generado el SBOM.
+      - name: Verificar SBOM
+        # Comprueba la existencia del archivo CycloneDX.
+        run: test -s target/bom.json
+
+      # Guarda el SBOM como artefacto de la ejecución.
+      - name: Guardar SBOM
+        # Conserva el archivo incluso si un paso posterior falla.
+        if: always()
+        # Acción oficial de publicación de artefactos.
+        uses: actions/upload-artifact@v4
+        with:
+          # Nombre del inventario publicado.
+          name: cyclonedx-sbom
+          # Ruta del archivo generado por CycloneDX.
+          path: target/bom.json
+          # Informa de un error si no existe el SBOM.
+          if-no-files-found: error
+          # Conserva el inventario durante 30 días.
+          retention-days: 30
