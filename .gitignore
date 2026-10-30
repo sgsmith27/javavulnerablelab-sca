@@ -1,0 +1,17 @@
+mysql-data/
+target/
+*.war
+*.class
+.idea/
+*.iml
+.vscode/
+.DS_Store
+# Archivos generados por Maven
+target/
+
+# Reportes locales de seguridad
+reportes-sca/
+dependency-check-report.*
+
+# Archivos temporales
+*.log
